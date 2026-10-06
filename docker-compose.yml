@@ -1,0 +1,292 @@
+services:
+
+  # =========================================================
+  # POSTGRESQL
+  # =========================================================
+
+  postgres:
+    image: postgres:17
+    container_name: portfolio-postgres
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: postgres
+
+    ports:
+      - "5432:5432"
+
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER} -d postgres"
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+
+  # =========================================================
+  # REDIS
+  # =========================================================
+
+  redis:
+    image: redis:7
+    container_name: portfolio-redis
+    restart: unless-stopped
+
+    ports:
+      - "6379:6379"
+
+    volumes:
+      - redis-data:/data
+
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "redis-cli",
+          "ping"
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+
+  # =========================================================
+  # ZIPKIN
+  # =========================================================
+
+  zipkin:
+    image: openzipkin/zipkin:latest
+    container_name: portfolio-zipkin
+    restart: unless-stopped
+
+    ports:
+      - "9411:9411"
+
+
+  # =========================================================
+  # EUREKA DISCOVERY
+  # =========================================================
+
+  discovery-service:
+    build:
+      context: ../discovery-service
+      dockerfile: Dockerfile
+
+    container_name: portfolio-discovery
+
+    ports:
+      - "8761:8761"
+
+    restart: unless-stopped
+
+
+  # =========================================================
+  # AUTH SERVICE
+  # =========================================================
+
+  auth-service:
+    build:
+      context: ../auth-service
+      dockerfile: Dockerfile
+
+    container_name: portfolio-auth
+
+    ports:
+      - "8081:8081"
+
+    environment:
+      SERVER_PORT: 8081
+
+      # Database
+      DB_URL: jdbc:postgresql://postgres:5432/auth_db
+      DB_USERNAME: ${POSTGRES_USER}
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+
+      # JWT
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRATION: ${JWT_EXPIRATION}
+      JWT_REFRESHEXPIRATION: ${JWT_REFRESH_EXPIRATION}
+
+      # Eureka
+      EUREKA_URL: http://discovery-service:8761/eureka/
+
+      # Zipkin
+      ZIPKIN_URL: http://zipkin:9411/api/v2/spans
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+      discovery-service:
+        condition: service_started
+
+      zipkin:
+        condition: service_started
+
+    restart: unless-stopped
+
+
+  # =========================================================
+  # PROJECT SERVICE
+  # =========================================================
+
+  project-service:
+    build:
+      context: ../project-service
+      dockerfile: Dockerfile
+
+    container_name: portfolio-project
+
+    ports:
+      - "8082:8082"
+
+    environment:
+      SERVER_PORT: 8082
+
+      # Database
+      DB_URL: jdbc:postgresql://postgres:5432/project_db
+      DB_USERNAME: ${POSTGRES_USER}
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+
+      # JWT
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRATION: ${JWT_EXPIRATION}
+      JWT_REFRESHEXPIRATION: ${JWT_REFRESH_EXPIRATION}
+
+      # Eureka
+      EUREKA_URL: http://discovery-service:8761/eureka/
+
+      # Zipkin
+      ZIPKIN_URL: http://zipkin:9411/api/v2/spans
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+      discovery-service:
+        condition: service_started
+
+      zipkin:
+        condition: service_started
+
+    restart: unless-stopped
+
+
+  # =========================================================
+  # CONTENT SERVICE
+  # =========================================================
+
+  content-service:
+    build:
+      context: ../content-service
+      dockerfile: Dockerfile
+
+    container_name: portfolio-content
+
+    ports:
+      - "8083:8083"
+
+    environment:
+      SERVER_PORT: 8083
+
+      # Database
+      DB_URL: jdbc:postgresql://postgres:5432/content_db
+      DB_USERNAME: ${POSTGRES_USER}
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+
+      # JWT
+      JWT_SECRET: ${CONTENT_JWT_SECRET}
+      JWT_EXPIRATION: ${CONTENT_JWT_EXPIRATION}
+
+      # Eureka
+      EUREKA_URL: http://discovery-service:8761/eureka/
+
+      # Zipkin
+      ZIPKIN_URL: http://zipkin:9411/api/v2/spans
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+      discovery-service:
+        condition: service_started
+
+      zipkin:
+        condition: service_started
+
+    restart: unless-stopped
+
+
+  # =========================================================
+  # GATEWAY SERVICE
+  # =========================================================
+
+  gateway-service:
+    build:
+      context: ../gateway-service
+      dockerfile: Dockerfile
+
+    container_name: portfolio-gateway
+
+    ports:
+      - "8080:8080"
+
+    environment:
+      SERVER_PORT: 8080
+
+      # Redis
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+
+      # JWT
+      JWT_SECRET: ${GATEWAY_JWT_SECRET}
+      JWT_EXPIRATION: ${JWT_EXPIRATION}
+
+      # Eureka
+      EUREKA_URL: http://discovery-service:8761/eureka/
+
+      # Zipkin
+      ZIPKIN_URL: http://zipkin:9411/api/v2/spans
+
+    depends_on:
+      redis:
+        condition: service_healthy
+
+      discovery-service:
+        condition: service_started
+
+      auth-service:
+        condition: service_started
+
+      project-service:
+        condition: service_started
+
+      content-service:
+        condition: service_started
+
+      zipkin:
+        condition: service_started
+
+    restart: unless-stopped
+
+
+# =========================================================
+# VOLUMES
+# =========================================================
+
+volumes:
+
+  postgres-data:
+    name: portfolio-postgres-data
+
+  redis-data:
+    name: portfolio-redis-data
